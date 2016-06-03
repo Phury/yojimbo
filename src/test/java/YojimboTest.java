@@ -1,5 +1,5 @@
 import org.testng.annotations.Test;
-import yojimbo.Yojimbo;
+import be.phury.yojimbo.Yojimbo;
 
 @Test(enabled = false)
 public class YojimboTest {
