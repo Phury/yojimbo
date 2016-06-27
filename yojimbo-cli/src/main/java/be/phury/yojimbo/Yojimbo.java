@@ -21,7 +21,7 @@ public class Yojimbo {
     }
 
     public RelaxServer server() {
-        return new RelaxServer(inputFolder);
+        return new RelaxServer().setStaticFolder(inputFolder);
     }
 
     public Yojimbo setInputFolder(String inputFolderName) {

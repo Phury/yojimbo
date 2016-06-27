@@ -47,7 +47,7 @@ public class Cli implements Loggable {
                         .setPort(config.getServerPort())
                         .setContextRoot(config.getServerContextRoot())
                         .setStaticFolder(config.getServerStaticFolder())
-                        .serve();
+                        .start();
             })
             .defaultValue(str -> {
                 System.out.printf("command [%s] does not exist, try: [compress, server]\n", str);

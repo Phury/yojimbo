@@ -3,7 +3,7 @@ package be.phury.relax.http;
 /**
  * Http headers definition
  */
-public enum HttpHeaders {
+public enum HttpHeader {
 
     ACCESS_CONTROL_ALLOW_METHODS("Access-Control-Allow-Methods"),
     ACCESS_CONTROL_ALLOW_HEADERS("Access-Control-Allow-Headers"),
@@ -12,7 +12,7 @@ public enum HttpHeaders {
 
     private final String value;
 
-    HttpHeaders(String value) {
+    HttpHeader(String value) {
         this.value = value;
     }
 

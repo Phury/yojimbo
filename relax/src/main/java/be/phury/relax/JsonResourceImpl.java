@@ -1,8 +1,8 @@
 package be.phury.relax;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
+import javax.inject.Inject;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
@@ -10,51 +10,58 @@ import javax.ws.rs.PUT;
 import java.util.List;
 import java.util.NoSuchElementException;
 
-public class RestResourceService {
+public class JsonResourceImpl implements JsonResource {
 
-    private static final Gson GSON = new Gson();
+    @Inject
+    private Serializer serializer;
 
-    private JsonProvider jsonProvider = new JsonProvider();
+    @Inject
+    private JsonDao jsonDao;
 
+    @Override
     @PUT
     public Object add(String collection, String json) {
-        List<JsonObject> list = jsonProvider.getList(collection, JsonProvider.Options.CREATE);
-        JsonObject toAdd = GSON.fromJson(json, JsonObject.class);
+        List<JsonObject> list = jsonDao.getList(collection, JsonDao.Options.CREATE);
+        JsonObject toAdd = serializer.fromString(json, JsonObject.class);
         toAdd.addProperty("id", list.size()+1);
         list.add(toAdd);
-        jsonProvider.saveList(collection, list);
+        jsonDao.saveList(collection, list);
         return toAdd;
     }
 
+    @Override
     @POST
     public Object update(String collection, String json) {
-        List<JsonObject> list = jsonProvider.getList(collection);
-        JsonObject toUpdate = GSON.fromJson(json, JsonObject.class);
+        List<JsonObject> list = jsonDao.getList(collection);
+        JsonObject toUpdate = serializer.fromString(json, JsonObject.class);
         int index = toUpdate.get("id").getAsInt() - 1;
         if (index < 0 || index >= list.size()) {
             throw new NoSuchElementException("no element with id " + index);
         }
         list.set(index, toUpdate);
-        jsonProvider.saveList(collection, list);
+        jsonDao.saveList(collection, list);
         return toUpdate;
     }
 
+    @Override
     @GET
     public Object get(String collection, Integer id) {
-        return jsonProvider.findById(jsonProvider.getList(collection), id);
+        return jsonDao.findById(jsonDao.getList(collection), id);
     }
 
+    @Override
     @GET
     public Object list(String collection, Integer offset, Integer limit) {
-        return PageableList.createPaging(jsonProvider.getList(collection), offset, limit);
+        return PageableList.createPaging(jsonDao.getList(collection), offset, limit);
     }
 
+    @Override
     @DELETE
     public Object delete(String collection, Integer id) {
-        List<JsonObject> list = jsonProvider.getList(collection);
+        List<JsonObject> list = jsonDao.getList(collection);
         JsonObject deleted = list.get(id);
         list.remove(id);
-        jsonProvider.saveList(collection, list);
+        jsonDao.saveList(collection, list);
         return deleted;
     }
 }

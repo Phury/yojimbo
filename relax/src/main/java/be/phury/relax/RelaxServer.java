@@ -2,12 +2,14 @@ package be.phury.relax;
 
 import be.phury.boilerplate.collections.MapBuilder;
 import be.phury.boilerplate.io.Streams;
+import be.phury.relax.http.HttpHeader;
 import be.phury.relax.http.HttpPath;
-import com.google.gson.Gson;
+import be.phury.relax.http.FileToMimeTypeMapper;
 import com.google.gson.JsonSyntaxException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
+import javax.inject.Inject;
 import java.io.*;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
@@ -19,164 +21,47 @@ import java.util.NoSuchElementException;
  */
 public class RelaxServer {
 
-    public static final String HEADER_ALLOW_METHODS = "Access-Control-Allow-Methods";
-    public static final String HEADER_ALLOW_HEADERS = "Access-Control-Allow-Headers";
-    public static final String HEADER_ALLOW_ORIGIN = "Access-Control-Allow-Origin";
-    public static final String ALLOW_ANY = "*";
+    @Inject
+    private FileToMimeTypeMapper mimeTypes;
 
+    @Inject
+    private Serializer serializer;
 
-    private static final Gson GSON = new Gson();
+    @Inject
+    private FileCompressor compressor;
 
-    public static final class Error {
-        private Integer code;
-        private String codeMeaning;
-        private String message;
-
-        public Integer getCode() {
-            return code;
-        }
-
-        public Error setCode(Integer code) {
-            this.code = code;
-            return this;
-        }
-
-        public String getCodeMeaning() {
-            return codeMeaning;
-        }
-
-        public Error setCodeMeaning(String codeMeaning) {
-            this.codeMeaning = codeMeaning;
-            return this;
-        }
-
-        public String getMessage() {
-            return message;
-        }
-
-        public Error setMessage(String message) {
-            this.message = message;
-            return this;
-        }
-    }
-
-    public static final class Response {
-        private Integer status;
-        private String contentType;
-        private InputStream content;
-        private Map<String, String> headers;
-
-        public Integer getStatus() {
-            return status;
-        }
-
-        public Response setStatus(Integer status) {
-            this.status = status;
-            return this;
-        }
-
-        public String getContentType() {
-            return contentType;
-        }
-
-        public Response setContentType(String contentType) {
-            this.contentType = contentType;
-            return this;
-        }
-
-        public InputStream getContent() {
-            return content;
-        }
-
-        public Response setContent(File content) {
-            try {
-                return setContent(new FileInputStream(content));
-            } catch (FileNotFoundException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
-        public Response setContent(InputStream content) {
-            this.content = content;
-            return this;
-        }
-
-        public Response setContent(String content) {
-            return setContent(new ByteArrayInputStream(content.getBytes()));
-        }
-
-        public Map<String, String> getHeaders() {
-            return headers;
-        }
-
-        public Response setHeaders(Map<String, String> headers) {
-            this.headers = headers;
-            return this;
-        }
-    }
-
-    public static final class MimeTypes {
-        private static final Map<String, String> MIME_TYPES_MAP = new MapBuilder<String, String>()
-                .put(".html", "text/html")
-                .put(".js", "application/javascript")
-                .put(".css", "text/css")
-                .put(".json", "application/json")
-                .put(".jpg", "image/jpeg")
-                .put(".jpeg", "image/jpeg")
-                .put(".gif", "image/gif")
-                .put(".png", "image/png")
-                .put(".pdf", "application/pdf")
-                .put(".zip", "application/zip")
-                .defaultValue("application/octet-stream")
-                .build();
-
-        public String getContentType(String fileType) {
-            return MIME_TYPES_MAP.get(fileType);
-        }
-
-        public String getContentType(File file) {
-            String fileName = getFileName(file);
-            return getContentType(fileName);
-        }
-
-        private String getFileName(File file) {
-            String path = file.getPath();
-            return path.substring(path.lastIndexOf('.'), path.length());
-        }
-    }
-
-    public interface RequestHandler {
-        Response handle(HttpExchange httpExchange, HttpPath httpPath);
-    }
+    @Inject
+    private JsonResource jsonResource;
 
     private File staticFolder;
+
     private Integer port = 8081;
+
     private String contextRoot = "/yojimbo";
-    private MimeTypes mimeTypes = new MimeTypes();
-    private Map<String, RequestHandler> requestHandlers = new MapBuilder<String, RequestHandler>()
+
+    private final Map<String, RequestHandler> requestHandlers = new MapBuilder<String, RequestHandler>()
             .put("/api", (httpExchange, httpPath) -> {
-                RestResourceService restResourceService = new RestResourceService();
                 try {
                     Object object;
                     switch (httpExchange.getRequestMethod()) {
                         case "GET":
                             if (httpPath.hasPathParamAt(2)) {
-                                object = restResourceService.get(httpPath.getPathParamAt(1), httpPath.getPathParamAsIntAt(2));
+                                object = jsonResource.get(httpPath.getPathParamAt(1), httpPath.getPathParamAsIntAt(2));
                             } else {
-                                object = restResourceService.list(
+                                object = jsonResource.list(
                                         httpPath.getPathParamAt(1),
                                         httpPath.getQueryParamAsInt("offset", 0),
                                         httpPath.getQueryParamAsInt("limit", -1));
                             }
                             break;
                         case "POST":
-                            object = restResourceService.update(httpPath.getPathParamAt(1), Streams.toString(httpExchange.getRequestBody()));
+                            object = jsonResource.update(httpPath.getPathParamAt(1), Streams.toString(httpExchange.getRequestBody()));
                             break;
                         case "PUT":
-                            object = restResourceService.add(httpPath.getPathParamAt(1), Streams.toString(httpExchange.getRequestBody()));
+                            object = jsonResource.add(httpPath.getPathParamAt(1), Streams.toString(httpExchange.getRequestBody()));
                             break;
                         case "DELETE":
-                            object = restResourceService.get(httpPath.getPathParamAt(1), httpPath.getPathParamAsIntAt(2));
+                            object = jsonResource.get(httpPath.getPathParamAt(1), httpPath.getPathParamAsIntAt(2));
                             break;
                         case "OPTIONS":
                             return corsHeaders(httpPath.toUri());
@@ -185,8 +70,8 @@ public class RelaxServer {
                     }
 
                     return new Response()
-                            .setContent(GSON.toJson(object))
-                            .setContentType(mimeTypes.getContentType(".json"))
+                            .setContent(serializer.toString(object))
+                            .setContentType(mimeTypes.getMimeType(".json"))
                             .setStatus(200);
 
                 } catch (NoSuchElementException e) {
@@ -199,15 +84,14 @@ public class RelaxServer {
                 String uri = httpPath.toUri();
                 String resource = getResource(uri);
 
-
                 if (httpPath.getQueryParam("zip") != null) {
-                    File file = new ZipService().zipFiles(new File(staticFolder, resource), httpPath.getQueryParam("zip"));
+                    File file = compressor.compress(new File(staticFolder, resource), httpPath.getQueryParam("zip").split(";"));
                     return new Response()
                             .setContent(file)
-                            .setContentType(mimeTypes.getContentType(file))
+                            .setContentType(mimeTypes.getMimeType(file))
                             .setStatus(200)
-                            .setHeaders(new MapBuilder<String, String>()
-                                    .put("Content-Disposition", "attachment; filename=\"" + file.getName() + "\"")
+                            .setHeaders(new MapBuilder<HttpHeader, String>()
+                                    .put(HttpHeader.CONTENT_DISPOSITION, "attachment; filename=\"" + file.getName() + "\"")
                                     .build());
                 } else {
                     File file = new File(staticFolder, resource);
@@ -216,10 +100,10 @@ public class RelaxServer {
                     } else {
                         return new Response()
                                 .setContent(file)
-                                .setContentType(mimeTypes.getContentType(file))
+                                .setContentType(mimeTypes.getMimeType(file))
                                 .setStatus(200)
-                                .setHeaders(new MapBuilder<String, String>()
-                                        .put("Content-Disposition", "attachment; filename=\"" + file.getName() + "\"")
+                                .setHeaders(new MapBuilder<HttpHeader, String>()
+                                        .put(HttpHeader.CONTENT_DISPOSITION, "attachment; filename=\"" + file.getName() + "\"")
                                         .build());
                     }
                 }
@@ -235,11 +119,11 @@ public class RelaxServer {
                     return htmlNotFound(httpPath.toUri());
                 } else if (file.isDirectory()) {
                     response.setContent(htmlListDirectory(file));
-                    response.setContentType(mimeTypes.getContentType(".html"));
+                    response.setContentType(mimeTypes.getMimeType(".html"));
                     response.setStatus(200);
                 } else {
                     response.setContent(file);
-                    response.setContentType(mimeTypes.getContentType(file));
+                    response.setContentType(mimeTypes.getMimeType(file));
                     response.setStatus(200);
                 }
 
@@ -255,18 +139,14 @@ public class RelaxServer {
 
     private Response corsHeaders(String uri) {
         return new Response()
-                .setHeaders(new MapBuilder<String, String>()
-                        .put(HEADER_ALLOW_ORIGIN, ALLOW_ANY)
-                        .put(HEADER_ALLOW_METHODS, "GET, POST, PUT, DELETE")
-                        .put(HEADER_ALLOW_HEADERS, "Origin, X-Requested-With, Content-Type, Accept, Authorization")
+                .setHeaders(new MapBuilder<HttpHeader, String>()
+                        .put(HttpHeader.ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                        .put(HttpHeader.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, PUT, DELETE")
+                        .put(HttpHeader.ACCESS_CONTROL_ALLOW_HEADERS, "Origin, X-Requested-With, Content-Type, Accept, Authorization")
                         .build());
     }
 
-    public RelaxServer(File staticFolder) {
-        this.staticFolder = staticFolder;
-    }
-
-    public void serve() {
+    public void start() {
 
         try {
 
@@ -284,8 +164,8 @@ public class RelaxServer {
                 }
 
                 if (response.getHeaders() != null) {
-                    for (Map.Entry<String, String> e : response.getHeaders().entrySet()) {
-                        httpExchange.getResponseHeaders().put(e.getKey(), Arrays.asList(e.getValue()));
+                    for (Map.Entry<HttpHeader, String> e : response.getHeaders().entrySet()) {
+                        httpExchange.getResponseHeaders().put(e.getKey().getValue(), Arrays.asList(e.getValue()));
                     }
                 }
 
@@ -322,35 +202,35 @@ public class RelaxServer {
 
     private Response jsonNotFound(String uri, Throwable cause) {
         return new Response()
-                .setContent(GSON.toJson(new Error()
+                .setContent(serializer.toString(new Error()
                         .setCode(404)
                         .setCodeMeaning("content not found")
                         .setMessage(cause.getMessage())))
-                .setContentType(mimeTypes.getContentType(".json"))
+                .setContentType(mimeTypes.getMimeType(".json"))
                 .setStatus(404);
     }
 
     private Response jsonBadRequest(String uri, Throwable cause) {
         return new Response()
-                .setContent(GSON.toJson(new Error()
+                .setContent(serializer.toString(new Error()
                         .setCode(400)
                         .setCodeMeaning("bad request")
                         .setMessage(cause.getMessage())))
-                .setContentType(mimeTypes.getContentType(".json"))
+                .setContentType(mimeTypes.getMimeType(".json"))
                 .setStatus(400);
     }
 
     private Response htmlNotFound(String uri) {
         return new Response()
                 .setContent("<h1>404</h1><p>content not found</p>")
-                .setContentType(mimeTypes.getContentType(".html"))
+                .setContentType(mimeTypes.getMimeType(".html"))
                 .setStatus(404);
     }
 
     private Response htmlServerError(String uri, Exception e) {
         return new Response()
                 .setContent("<h1>500</h1><pre>"+ getStackTrace(e) +"</pre>")
-                .setContentType(mimeTypes.getContentType(".html"))
+                .setContentType(mimeTypes.getMimeType(".html"))
                 .setStatus(500);
     }
 
@@ -401,11 +281,108 @@ public class RelaxServer {
         return staticFolder;
     }
 
+    public RelaxServer setStaticFolder(File staticFolder) {
+        this.staticFolder = staticFolder;
+        return this;
+    }
+
     public RelaxServer setStaticFolder(String staticFolder) {
         this.staticFolder = new File(staticFolder);
         if (!this.staticFolder.isDirectory()) {
             throw new RuntimeException("static folder must be a directory, was: " + staticFolder);
         }
         return this;
+    }
+
+    public static final class Error {
+        private Integer code;
+        private String codeMeaning;
+        private String message;
+
+        public Integer getCode() {
+            return code;
+        }
+
+        public Error setCode(Integer code) {
+            this.code = code;
+            return this;
+        }
+
+        public String getCodeMeaning() {
+            return codeMeaning;
+        }
+
+        public Error setCodeMeaning(String codeMeaning) {
+            this.codeMeaning = codeMeaning;
+            return this;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+
+        public Error setMessage(String message) {
+            this.message = message;
+            return this;
+        }
+    }
+
+    public static final class Response {
+        private Integer status;
+        private String contentType;
+        private InputStream content;
+        private Map<HttpHeader, String> headers;
+
+        public Integer getStatus() {
+            return status;
+        }
+
+        public Response setStatus(Integer status) {
+            this.status = status;
+            return this;
+        }
+
+        public String getContentType() {
+            return contentType;
+        }
+
+        public Response setContentType(String contentType) {
+            this.contentType = contentType;
+            return this;
+        }
+
+        public InputStream getContent() {
+            return content;
+        }
+
+        public Response setContent(File content) {
+            try {
+                return setContent(new FileInputStream(content));
+            } catch (FileNotFoundException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        public Response setContent(InputStream content) {
+            this.content = content;
+            return this;
+        }
+
+        public Response setContent(String content) {
+            return setContent(new ByteArrayInputStream(content.getBytes()));
+        }
+
+        public Map<HttpHeader, String> getHeaders() {
+            return headers;
+        }
+
+        public Response setHeaders(Map<HttpHeader, String> headers) {
+            this.headers = headers;
+            return this;
+        }
+    }
+
+    public interface RequestHandler {
+        Response handle(HttpExchange httpExchange, HttpPath httpPath);
     }
 }

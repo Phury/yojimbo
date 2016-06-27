@@ -8,11 +8,10 @@ import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-public class ZipService {
+public class FileCompressorZip implements FileCompressor {
 
-    public File zipFiles(File rootDir, String query) {
-        String[] fileNames = query.split(";");
-
+    @Override
+    public File compress(File rootDir, String[] fileNames) {
         File zipFile = new File(System.getProperty("java.io.tmpdir"), UUID.randomUUID().toString() + ".zip");
 
         try (
